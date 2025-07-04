@@ -44,11 +44,13 @@ body {
 <div id="game">
   <div id="board"></div>
   <div id="status"></div>
+  <label><input type="checkbox" id="aiToggle" checked> Play vs Computer</label>
   <button id="resetBtn">Reset Game</button>
 </div>
 <script>
 const boardElement = document.getElementById('board');
 const statusEl = document.getElementById('status');
+const aiToggle = document.getElementById('aiToggle');
 const resetBtn = document.getElementById('resetBtn');
 
 let board = [];
@@ -291,6 +293,10 @@ function computerMove() {
   updateStatus();
 }
 
+aiToggle.addEventListener('change', () => {
+  playComputer = aiToggle.checked;
+  if (playComputer && turn === 'b') setTimeout(computerMove, 200);
+});
 resetBtn.addEventListener('click', initBoard);
 initBoard();
 </script>
