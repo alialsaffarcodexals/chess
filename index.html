@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Web Chess</title>
+<style>
+body {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  font-family: Arial, sans-serif;
+  background: #f0f0f0;
+}
+#game {
+  text-align: center;
+}
+#board {
+  display: grid;
+  grid-template-columns: repeat(8, 60px);
+  grid-template-rows: repeat(8, 60px);
+  gap: 0;
+  border: 2px solid #333;
+}
+.square {
+  width: 60px;
+  height: 60px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 48px;
+  user-select: none;
+  border-radius: 4px;
+  cursor: move;
+}
+.dark { background: #769656; }
+.light { background: #eeeed2; }
+.highlight { box-shadow: inset 0 0 0 3px yellow; }
+.dragging { opacity: 0.5; }
+#status { margin-top: 10px; font-size: 18px; }
+</style>
+</head>
+<body>
+<div id="game">
+  <div id="board"></div>
+  <div id="status"></div>
+  <button id="resetBtn">Reset Game</button>
+</div>
+<script>
+const boardElement = document.getElementById('board');
+const statusEl = document.getElementById('status');
+const resetBtn = document.getElementById('resetBtn');
+
+let board = [];
+let turn = 'w';
+let selected = null;
+let playComputer = true; // against AI
+
+const PIECES = {
+  wP: '♙', wR: '♖', wN: '♘', wB: '♗', wQ: '♕', wK: '♔',
+  bP: '♟', bR: '♜', bN: '♞', bB: '♝', bQ: '♛', bK: '♚'
+};
+
+function initBoard() {
+  board = [
+    ['bR','bN','bB','bQ','bK','bB','bN','bR'],
+    ['bP','bP','bP','bP','bP','bP','bP','bP'],
+    ['','','','','','','',''],
+    ['','','','','','','',''],
+    ['','','','','','','',''],
+    ['','','','','','','',''],
+    ['wP','wP','wP','wP','wP','wP','wP','wP'],
+    ['wR','wN','wB','wQ','wK','wB','wN','wR']
+  ];
+  turn = 'w';
+  selected = null;
+  render();
+  updateStatus();
+}
+
+function render() {
+  boardElement.innerHTML = '';
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const sq = document.createElement('div');
+      sq.className = 'square ' + ((r+c)%2 ? 'dark' : 'light');
+      sq.dataset.square = r + '-' + c;
+      const piece = board[r][c];
+      if (piece) {
+        sq.textContent = PIECES[piece];
+        if (piece[0] === turn) sq.draggable = true;
+      }
+      sq.addEventListener('click', onSquareClick);
+      sq.addEventListener('dragstart', onDragStart);
+      sq.addEventListener('dragover', onDragOver);
+      sq.addEventListener('drop', onDrop);
+      boardElement.appendChild(sq);
+    }
+  }
+}
+
+function onSquareClick(e) {
+  const [r,c] = e.currentTarget.dataset.square.split('-').map(Number);
+  const piece = board[r][c];
+  if (selected) {
+    const moves = legalMoves(selected.r, selected.c);
+    if (moves.some(m => m.r===r && m.c===c)) {
+      movePiece(selected.r, selected.c, r, c);
+      clearHighlights();
+      selected = null;
+      render();
+      if (checkGameEnd()) return;
+      turn = turn==='w' ? 'b' : 'w';
+      updateStatus();
+      if (playComputer && turn==='b') {
+        setTimeout(computerMove, 200);
+      }
+      return;
+    }
+  }
+  if (piece && piece[0] === turn) {
+    selected = {r,c};
+    highlightMoves(r,c);
+  }
+}
+
+function onDragStart(e) {
+  const [r,c] = e.target.dataset.square.split('-').map(Number);
+  const piece = board[r][c];
+  if (!piece || piece[0] !== turn) {
+    e.preventDefault();
+    return;
+  }
+  selected = {r,c};
+  highlightMoves(r,c);
+  e.dataTransfer.setData('text/plain', '');
+}
+
+function onDragOver(e) {
+  if (!selected) return;
+  const [r,c] = e.currentTarget.dataset.square.split('-').map(Number);
+  const moves = legalMoves(selected.r, selected.c);
+  if (moves.some(m=>m.r===r && m.c===c)) e.preventDefault();
+}
+
+function onDrop(e) {
+  e.preventDefault();
+  if (!selected) return;
+  const [r,c] = e.currentTarget.dataset.square.split('-').map(Number);
+  const moves = legalMoves(selected.r, selected.c);
+  if (moves.some(m=>m.r===r && m.c===c)) {
+    movePiece(selected.r, selected.c, r, c);
+    clearHighlights();
+    selected = null;
+    render();
+    if (checkGameEnd()) return;
+    turn = turn==='w' ? 'b' : 'w';
+    updateStatus();
+    if (playComputer && turn==='b') setTimeout(computerMove,200);
+  } else {
+    clearHighlights();
+    selected = null;
+  }
+}
+
+function highlightMoves(r,c) {
+  clearHighlights();
+  const moves = legalMoves(r,c);
+  moves.forEach(m => {
+    const el = boardElement.children[m.r*8+m.c];
+    el.classList.add('highlight');
+  });
+}
+
+function clearHighlights() {
+  Array.from(boardElement.children).forEach(el => el.classList.remove('highlight'));
+}
+
+function movePiece(fr,fc,tr,tc) {
+  board[tr][tc] = board[fr][fc];
+  board[fr][fc] = '';
+  // pawn promotion
+  if (board[tr][tc]==='wP' && tr===0) board[tr][tc]='wQ';
+  if (board[tr][tc]==='bP' && tr===7) board[tr][tc]='bQ';
+}
+
+function inCheck(color) {
+  const {r:kr,c:kc} = findKing(color);
+  const moves = allMoves(color==='w'?'b':'w');
+  return moves.some(m => m.tr===kr && m.tc===kc);
+}
+
+function findKing(color) {
+  for (let r=0;r<8;r++)
+    for (let c=0;c<8;c++)
+      if (board[r][c]===color+'K') return {r,c};
+  return null;
+}
+
+function allMoves(color) {
+  let moves=[];
+  for (let r=0;r<8;r++)
+    for (let c=0;c<8;c++)
+      if (board[r][c] && board[r][c][0]===color)
+        moves.push(...legalMoves(r,c,true));
+  return moves;
+}
+
+function legalMoves(r,c,verbose) {
+  const piece = board[r][c];
+  if (!piece) return [];
+  const color = piece[0];
+  const type = piece[1];
+  const dir = color==='w' ? -1 : 1;
+  let moves = [];
+  function addMove(tr,tc) {
+    moves.push(verbose?{r,tr,c,tc}:{r:tr,c:tc});
+  }
+  if (type==='P') {
+    if (inBounds(r+dir,c) && !board[r+dir][c]) addMove(r+dir,c);
+    if ((color==='w' && r===6 || color==='b' && r===1) && !board[r+dir][c] && !board[r+2*dir][c]) addMove(r+2*dir,c);
+    for (let dc of [-1,1])
+      if (inBounds(r+dir,c+dc) && board[r+dir][c+dc] && board[r+dir][c+dc][0]!==color) addMove(r+dir,c+dc);
+  }
+  if (type==='N') {
+    [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]].forEach(([dr,dc])=>{
+      const tr=r+dr, tc=c+dc;
+      if (inBounds(tr,tc) && (!board[tr][tc] || board[tr][tc][0]!==color)) addMove(tr,tc);
+    });
+  }
+  const sliders = {B:[[1,1],[1,-1],[-1,1],[-1,-1]], R:[[1,0],[-1,0],[0,1],[0,-1]], Q:[[1,1],[1,-1],[-1,1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]]};
+  if (sliders[type]) {
+    sliders[type].forEach(([dr,dc])=>{
+      let tr=r+dr, tc=c+dc;
+      while(inBounds(tr,tc)) {
+        if (!board[tr][tc]) addMove(tr,tc);
+        else { if (board[tr][tc][0]!==color) addMove(tr,tc); break; }
+        tr+=dr; tc+=dc;
+      }
+    });
+  }
+  if (type==='K') {
+    for (let dr=-1; dr<=1; dr++) for (let dc=-1; dc<=1; dc++) {
+      if (!dr && !dc) continue;
+      const tr=r+dr, tc=c+dc;
+      if (inBounds(tr,tc) && (!board[tr][tc] || board[tr][tc][0]!==color)) addMove(tr,tc);
+    }
+  }
+  // filter checks
+  moves = moves.filter(m => {
+    const tmp = board[m.r][m.c];
+    board[m.r][m.c] = board[r][c];
+    board[r][c] = '';
+    const inC = inCheck(color);
+    board[r][c] = board[m.r][m.c];
+    board[m.r][m.c] = tmp;
+    return !inC;
+  });
+  return moves;
+}
+
+function inBounds(r,c){return r>=0&&r<8&&c>=0&&c<8;}
+
+function checkGameEnd() {
+  if (inCheck(turn)) {
+    if (allMoves(turn).length===0) {
+      alert('Checkmate! ' + (turn==='w'?'Black':'White') + ' wins');
+      return true;
+    } else {
+      alert('Check!');
+    }
+  } else if (allMoves(turn).length===0) {
+    alert('Stalemate!');
+    return true;
+  }
+  return false;
+}
+
+function updateStatus() {
+  statusEl.textContent = (turn==='w'?'White':'Black') + " to move";
+}
+
+function computerMove() {
+  const moves = allMoves('b');
+  if (moves.length===0) return;
+  const m = moves[Math.floor(Math.random()*moves.length)];
+  movePiece(m.r,m.c,m.tr,m.tc);
+  render();
+  if (checkGameEnd()) return;
+  turn='w';
+  updateStatus();
+}
+
+resetBtn.addEventListener('click', initBoard);
+initBoard();
+</script>
+</body>
+</html>
